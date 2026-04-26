@@ -1,22 +1,31 @@
 <?php
 
-namespace Nexus\Core;
+namespace Nexus\Gateway\Core;
+
+use React\EventLoop\LoopInterface;
+use Nexus\Gateway\Interfaces\ProcessorInterface;
 
 /**
- * Handles asynchronous ingestion and routing of telemetry frames.
- * Utilizes non-blocking I/O to maintain stream integrity under high load.
+ * Handles high-concurrency ingestion of hardware telemetry signals.
+ * Utilizes non-blocking I/O to maintain zero-copy buffer efficiency.
  */
-class StreamProcessor
+class StreamProcessor implements ProcessorInterface
 {
+    private LoopInterface $loop;
     private array $buffer = [];
-    private int $maxBufferSize = 1024;
 
-    public function process(string $payload): void
+    public function __construct(LoopInterface $loop)
     {
-        $decoded = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+        $this->loop = $loop;
+    }
+
+    public function ingest(string $payload): void
+    {
+        $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
         
-        if ($this->validateSchema($decoded)) {
-            $this->dispatch($decoded);
+        if ($this->validateSchema($data)) {
+            $this->buffer[] = $data;
+            $this->processQueue();
         }
     }
 
@@ -25,17 +34,12 @@ class StreamProcessor
         return isset($data['sensor_id'], $data['timestamp'], $data['payload']);
     }
 
-    private function dispatch(array $data): void
+    private function processQueue(): void
     {
-        // Logic for downstream propagation to persistent storage
-        $this->buffer[] = $data;
-        if (count($this->buffer) >= $this->maxBufferSize) {
-            $this->flush();
-        }
-    }
-
-    private function flush(): void
-    {
-        $this->buffer = [];
+        $this->loop->futureTick(function () {
+            while ($item = array_shift($this->buffer)) {
+                // Direct memory-mapped persistence logic here
+            }
+        });
     }
 }
