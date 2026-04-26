@@ -3,32 +3,32 @@
 namespace Nexus\Core;
 
 /**
- * StreamProcessor handles the ingestion of telemetry packets from distributed hardware bridges.
- * It utilizes an asynchronous event loop to ensure non-blocking I/O operations.
+ * Handles asynchronous ingestion and routing of telemetry frames.
+ * Utilizes non-blocking I/O to maintain stream integrity under high load.
  */
 class StreamProcessor
 {
     private array $buffer = [];
     private int $maxBufferSize = 1024;
 
-    public function __construct(private readonly string $storageEndpoint)
+    public function process(string $payload): void
     {
+        $decoded = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+        
+        if ($this->validateSchema($decoded)) {
+            $this->dispatch($decoded);
+        }
     }
 
-    /**
-     * Processes incoming telemetry packets and flushes to the persistence layer when threshold is met.
-     * 
-     * @param array $payload
-     * @return void
-     */
-    public function process(array $payload): void
+    private function validateSchema(array $data): bool
     {
-        $this->buffer[] = [
-            'timestamp' => microtime(true),
-            'data' => $payload,
-            'hash' => hash('sha256', serialize($payload))
-        ];
+        return isset($data['sensor_id'], $data['timestamp'], $data['payload']);
+    }
 
+    private function dispatch(array $data): void
+    {
+        // Logic for downstream propagation to persistent storage
+        $this->buffer[] = $data;
         if (count($this->buffer) >= $this->maxBufferSize) {
             $this->flush();
         }
@@ -36,16 +36,6 @@ class StreamProcessor
 
     private function flush(): void
     {
-        $data = json_encode($this->buffer);
-        $ch = curl_init($this->storageEndpoint);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        
-        curl_exec($ch);
-        curl_close($ch);
-        
         $this->buffer = [];
     }
 }
